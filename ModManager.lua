@@ -1,7 +1,7 @@
 #!/bin/lua
 
 -- A game independant mod manager by superpowers04
--- 
+-- BACKUP YOUR GAME, THIS MOD MANAGER DOES NOT BACKUP ANY GAME FILES CURRENTLY
 -- This setup is for Cyberpunk but no directories are hardcoded besides ManagerMods and MANAGERDOWNLOADS
 -- This works by using a bunch of symbolic links. This requires SuperUtils.lua and will probably only work on Linux and POSSIBLY MacOS
 -- Currently, the mod manager doesn't keep track of ANY files, it just goes off of the files it finds inside of a mod, so if a file is not included in the zip, it should never be modified
