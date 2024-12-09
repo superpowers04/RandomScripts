@@ -46,9 +46,60 @@ actions = {
 			actions.zip(v)
 		end
 	end,
+	exportlist = function(file)
+		file = file or "ManagerModlists/export.txt"
+		if not file:find('/') then
+			file = "ManagerModlists/"..file
+		end
+		local mods = {}
+		local modList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
+		for i,mod in pairs(modList) do
+			local file = io.open('./ManagerMods/'..mod..'/enabled','r')
+			if(file) then
+				file:close()
+				mods[#mods+1] = mod
+			end
+		end
+
+		util.execute('mkdir -p',file:match('.+/'))
+		local out = io.open(file,'w')
+		out:write(table.concat(mods,'\n'))
+		out:close()
+		printf('Exported %i mods to %s',#mods,file)
+
+	end,
+	importlist = function(file)
+		file = file or "ManagerModlists/export.txt"
+		if not file:find('/') then
+			file = "ManagerModlists/"..file
+		end
+		local mods = {}
+		local listFile = io.open(file,'r')
+
+		if not listFile then return printf('%s is not a valid list',file) end
+		local installedModsList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
+		local modList = listFile:read('*a'):split('\n')
+		listFile:close()
+		local unfoundMods = {}
+		for i,mod in pairs(modList) do
+			local plainList = util.execute('find',v)
+			if not plainList or plainList == "" then 
+				unfoundMods[#unfoundMods+1] = mod
+				printf('%s was not found, search queued!',mod)
+			else
+				actions.install(mod)
+			end
+		end
+		if(#unfoundMods > 0) then
+			printf('Unable to find %i mods TODO: ADD SUPPORT FOR AUTOFINDING MODS')
+		end
+		print('Finished importing list')
+
+
+	end,
 	zip = function(...)
 		local file = table.concat({...},' ')
-		local mod = file:match('/([^/]+)%.'):match('(.-)[_%-0-9]+$')
+		local mod = file:match('/([^/]+)%.')
 		
 		util.execute('mkdir','./MANAGERDOWNLOADS')
 		-- if(file:find('https'))
@@ -95,7 +146,7 @@ actions = {
 				if(limit <= 0) then
 					print('MANAGERDOWNLOADS was NOT emptied!')
 				end
-
+				actions.stripver(mod)
 				printf('Imported %q successfully!',mod)
 				return
 			end
@@ -115,22 +166,58 @@ actions = {
 		print('---------------\n')
 		return
 	end,
+	stripversions = function()
+		local modList = util.execute('ls ManagerMods/'):split('\n')
+		for i,v in pairs(modList) do
+			actions.stripver(v)
+		end
+		return
+	end,
+	stripver = function(mod)
+		v = './ManagerMods/'.. getMod(mod)
+		local plainList = util.execute('find',v)
+		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
+		local e,version = v:match('(.-)(? v?[%._%-0-9]+)$')
+		if(e and version and version ~= "") then
+			version = version:gsub('^[%-_ ]+',''):gsub('[ _-]*$','')
+			util.execute('mv',v,e)
+			local file = io.open(e..'/MMVERSION','w')
+			file:write(version or "INVALID")
+			file:close()
+			print(('%s > %s'):format(v,e))
+		end
+		return
+	end,
 	list = function()
 		local modList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
 		local enabled = {}
 		local disabled = {}
+		local versions = {}
+		local VERSIONSIZE = 0
+		for i,v in pairs(modList) do
+			local file = io.open('./ManagerMods/'..v..'/MMVERSION','r')
+			if(file) then
+				version = file:read('*a')
+				versions[v] = version
+				file:close()
+				if(VERSIONSIZE < #version) then
+					VERSIONSIZE = #version
+				end
+			end
+		end
 		for i,v in pairs(modList) do
 			local str = tostring(i)
 			local size = str .. (' '):rep(4-#str)
 			local enabled = false
+			local version = versions[v] or "N/A"
 			local file = io.open('./ManagerMods/'..v..'/enabled','r')
 			if(file) then
 				file:close()
 				enabled = true
 			end
-			modList[i] = size .. ' | ' .. (enabled and "True " or 'False') ..' | '.. v
+			modList[i] = size .. ' | ' .. (enabled and "✔" or '🗙') ..' | '..version..(" "):rep(VERSIONSIZE-#version)..' | '.. v
 		end
-		print('ID   | State | Folder \n---------------\n'..table.concat(modList,'\n'))
+		print('ID   | ? | Ver  | Folder  | \n---------------\n'..table.concat(modList,'\n'))
 		return
 	end,
 	p = function(mod)
@@ -258,6 +345,19 @@ actions = {
 		for _,v in pairs({...}) do
 			actions.remove(v)
 		end
+	end,
+	delete = function(mod)
+		if not mod or mod == "" then return printf('No mod specified!') end
+		mod = getMod(mod)
+		local modName = getMod(mod)
+		if not allowFuzzy then modName = modName .. '/' end
+		local plainList = util.execute('find','ManagerMods/'..modName)
+		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
+		if(plainList:find(modName.."/enabled")) then
+			actions.remove(mod)
+		end
+		util.execute('mv','ManagerMods/'..modName,'/tmp/BACKUP_'..modName)
+		printf(('Moved %s to %s'):format('ManagerMods/'..modName,'/tmp/BACKUP_'..modName))
 	end,
 
 	-- registermoddedfilelist = function(mod,filelist)
