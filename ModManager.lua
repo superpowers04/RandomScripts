@@ -82,7 +82,7 @@ actions = {
 		listFile:close()
 		local unfoundMods = {}
 		for i,mod in pairs(modList) do
-			local plainList = util.execute('find',mod)
+			local plainList = util.execute('find','ManagerMods/'..mod)
 			if not plainList or plainList == "" then 
 				unfoundMods[#unfoundMods+1] = mod
 				printf('%s was not found, search queued!',mod)
