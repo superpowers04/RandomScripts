@@ -8,6 +8,7 @@
 -- 7z is required for the zip command
 local util = require('SuperUtils')
 
+
 -- Config
 
 -- Folders that can be used to identify zips for the game
@@ -31,14 +32,34 @@ local pwd = os.getenv('PWD')..'/'
 local selection = ""
 local cached_action = ""
 util.applyExtensions()
-
+local function truthy(b)
+    if(b == nil) then return false end
+    if(type(b) == "boolean") then return b end
+    if(type(b) == "number") then return b == 1 end
+    if(type(b) == "string") then 
+        local sub = b:sub(1,1):lower()
+        return (sub=='y' or sub=='t' or sub == "1")
+    end
+    return false
+end
 local function getMod(id)
 	local n = tonumber(id)
-	if(not n or n ~= n) then return id end
+
+	if(not n or n ~= n) then 
+		if(id:find('/?ManagerMods/')) then
+			return id:match('ManagerMods/(.-)/')
+		end
+		return id
+	end
 	local list = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
 	return list[n]
 end
-
+local function fileExists(file)
+	local file = io.open(file,'r')
+	if not file then return false end
+	file:close()
+	return true
+end
 local actions
 actions = {
 	za = function(...)
@@ -66,7 +87,6 @@ actions = {
 		out:write(table.concat(mods,'\n'))
 		out:close()
 		printf('Exported %i mods to %s',#mods,file)
-
 	end,
 	importlist = function(file)
 		file = file or "ManagerModlists/export.txt"
@@ -94,23 +114,27 @@ actions = {
 			printf('Unable to find %i mods TODO: ADD SUPPORT FOR AUTOFINDING MODS')
 		end
 		print('Finished importing list')
-
-
 	end,
 	zip = function(...)
 		local file = table.concat({...},' ')
 		local mod = file:match('/([^/]+)%.')
+		actions.zipnamed(file,mod)
+	end,
+	zipnamed = function(file,mod)
 		
 		util.execute('mkdir','./MANAGERDOWNLOADS')
 		-- if(file:find('https'))
-
+		printf('Extracting....')
 		util.execute('7z X',file,'-o./MANAGERDOWNLOADS')
 		local fileList = util.execute('find','./MANAGERDOWNLOADS')
+		printf('Searching for known folders...')
 		for i,v in ipairs(KnownFolders) do
 			local match = fileList:match('([^\n]+)'..v)
 			if(match) then
 				-- actions.registermoddedfile(mod,table.unpack(util.execute('find',match):split('\n')))
-				mod = './ManagerMods/'..getMod(mod)..'/'
+				printf('Mod is valid, attempting to remove any older versions..')
+				actions.delete(mod)
+				local _mod,mod = mod,'./ManagerMods/'..getMod(mod)..'/'
 				for _,item in pairs(util.execute('find',match..'/','-type','f'):split('\n')) do
 					-- print(item)
 					if item and item ~= "" and item ~= "/"  then
@@ -146,8 +170,8 @@ actions = {
 				if(limit <= 0) then
 					print('MANAGERDOWNLOADS was NOT emptied!')
 				end
-				actions.stripver(mod)
-				printf('Imported %q successfully!',mod)
+				actions.stripver(_mod)
+				printf('Imported %s to %s successfully!',_mod,mod)
 				return
 			end
 
@@ -177,22 +201,29 @@ actions = {
 		v = './ManagerMods/'.. getMod(mod)
 		local plainList = util.execute('find',v)
 		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
-		local e,version = v:match('(.-)(? v?[%._%-0-9]+)$')
+		local e,version = v:match('(.-)( ?v?[%._%-0-9]+)$')
 		if(e and version and version ~= "") then
+			local enabled = fileExists(v..'/enabled')
+			if(enabled) then
+				actions.remove(mod)
+			end
 			version = version:gsub('^[%-_ ]+',''):gsub('[ _-]*$','')
 			util.execute('mv',v,e)
 			local file = io.open(e..'/MMVERSION','w')
 			file:write(version or "INVALID")
 			file:close()
 			print(('%s > %s'):format(v,e))
+			if(enabled) then
+				actions.enable(e)
+			end
 		end
 		return
 	end,
-	list = function()
-		local modList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
-		local enabled = {}
-		local disabled = {}
-		local versions = {}
+	list = function(sort)
+		local _modList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
+		local modList,versions = {},{},{}
+		local shouldSort = sort ~= nil
+		sort = truthy(sort)
 		local VERSIONSIZE = 0
 		for i,v in pairs(modList) do
 			local file = io.open('./ManagerMods/'..v..'/MMVERSION','r')
@@ -205,17 +236,20 @@ actions = {
 				end
 			end
 		end
-		for i,v in pairs(modList) do
+		for i,v in pairs(_modList) do
 			local str = tostring(i)
 			local size = str .. (' '):rep(4-#str)
-			local enabled = false
 			local version = versions[v] or "N/A"
-			local file = io.open('./ManagerMods/'..v..'/enabled','r')
-			if(file) then
-				file:close()
-				enabled = true
+			local enabled = fileExists('./ManagerMods/'..v..'/enabled')
+			local txt = size .. ' | ' .. (enabled and "✔" or '🗙') ..' | '..version..(" "):rep(VERSIONSIZE-#version)..' | '.. v
+			if(shouldSort) then
+				if(enabled == sort) then
+					modList[#modList+1] = txt
+				end
+			else
+				modList[i] = txt
+
 			end
-			modList[i] = size .. ' | ' .. (enabled and "✔" or '🗙') ..' | '..version..(" "):rep(VERSIONSIZE-#version)..' | '.. v
 		end
 		print('ID   | ? | Ver  | Folder  | \n---------------\n'..table.concat(modList,'\n'))
 		return
@@ -227,13 +261,13 @@ actions = {
 		if not mod or mod == "" then return printf('No mod specified!') end
 		mod = getMod(mod)
 		local modName = getMod(mod)
-		if not allowFuzzy then modName = modName .. '/' end
+		if not truthy(allowFuzzy) then modName = modName .. '/' end
 		local plainList = util.execute('find','ManagerMods/'..modName)
 		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
 		-- local list = {}
 		plainList = plainList:gsub('^[^\n+]\n','')
 
-		local force = force and force:sub(1) == "t"
+		local force = truthy(force)
 		local nameLength = #modName
 		local directories = {}
 		print('Unlinking files')
@@ -290,14 +324,54 @@ actions = {
 		util.execute('unlink','ManagerMods/'..modName..'/enabled')
 		printf('Finished')
 	end,
+	download = function(url,name)
+		if not url then return printf('Missing URL!') end
+		local MODNAME,version = nil, "dl date: "..os.date('%x')
+		if not name then 
+			name = url:match('.+/([^?]+)%.')
+			local _version = name:match('( ?v?[%._%-0-9]+)$')
+			if(_version) then
+				name,version = name:sub(0,-(#_version+1)),_version
+			end
+		else
+			local _version = url:match('.+/([^?]+)%.[^?]+'):match('( ?v?[%._%-0-9]+)$')
+			if(_version) then
+				version = _version
+			end
+
+		end
+		version = version:gsub('^[%-_ ]+',''):gsub('[ _-]*$','')
+
+		local extension = url:match('[^?]+(%.[^?]+)')
+		local file = '/tmp/MANAGERMODSTEMP'..extension
+		printf('Downloading %s.\n Name:%s Version:%s',url,name,version)
+		util.exec('wget','--quiet','--show-progress',url,'-O'..file)
+		local output = io.open(file,'r')
+		if not output then
+			return printf('Unable to find downloaded file!')
+		end
+		util.execute('mkdir','./MANAGERDOWNLOADS')
+		if(version) then
+			local v = io.open('MANAGERDOWNLOADS/MMVERSION','w')
+			if v then 
+				v:write(version)
+				v:close()
+			else
+				printf('UNABLE TO WRITE VERSION TO MANAGERDOWNLOADS/MMVERSION')
+			end
+		end
+		output:close()
+		actions.zipnamed(file,name)
+		util.execute('rm '..file)
+	end,
 	install = function(mod,force,allowFuzzy)
 		if not mod or mod == ""  then return printf('No mod specified!') end
 		mod = getMod(mod)
 		local modName = mod
-		if not (allowFuzzy and allowFuzzy == "t") then modName = modName .. '/' end
+		if not (truthy(allowFuzzy)) then modName = modName .. '/' end
 		local plainList = util.execute('find','ManagerMods/'..modName,'-type','f')
 		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
-		local force = force and force:sub(1) == "t"
+		local force = truthy(force)
 		local nameLength = #modName
 		for _file in plainList:gmatch('(ManagerMods/(.-/[^\n]+))') do
 			local path = pwd.._file
@@ -346,6 +420,12 @@ actions = {
 			actions.remove(v)
 		end
 	end,
+	disableall = function()
+		local modList = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
+		for _,v in pairs(modList) do
+			actions.remove(v)
+		end
+	end,
 	delete = function(mod)
 		if not mod or mod == "" then return printf('No mod specified!') end
 		mod = getMod(mod)
@@ -353,11 +433,12 @@ actions = {
 		if not allowFuzzy then modName = modName .. '/' end
 		local plainList = util.execute('find','ManagerMods/'..modName)
 		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
-		if(plainList:find(modName.."/enabled")) then
+		if(plainList:find("/enabled")) then
 			actions.remove(mod)
 		end
-		util.execute('mv','ManagerMods/'..modName,'/tmp/BACKUP_'..modName)
-		printf(('Moved %s to %s'):format('ManagerMods/'..modName,'/tmp/BACKUP_'..modName))
+		local out = '/tmp/BACKUP_'..os.time()..'_'..modName
+		util.execute('mv','ManagerMods/'..modName,out)
+		printf(('Moved %s to %s'):format('ManagerMods/'..modName,out))
 	end,
 
 	-- registermoddedfilelist = function(mod,filelist)
@@ -405,11 +486,49 @@ actions = {
 			util.execute('mv ',item,endResult)
 			printf('%q > %q',item,endResult)
 		end
+	end,
+	help=function()
+		printf([[ModManager.lua [ACTION] [ARGUMENTS] - A universal UNIX ONLY mod manager that mostly uses symbolic links to load mods. Originally designed for Cyberpunk.
+Actions:
+	enable, install, e, i - Enable a mod
+		> enable [MODID|MODNAME]
+	ia - Enable several mods
+		> ia [MODID|MODNAME]...
+	disable, remove, d, r - Disable a mod
+		> disable [MODID|MODNAME]
+	da - Disable several mods
+		> da [MODID|MODNAME]...
+	delete - Disable and delete a mod
+		> delete [MODID|MODNAME]
+	list - List all mods
+		> list [ONLY SHOW TOGGLED MODS]
+	registermoddedfile, rmf - Add a file to an existing mod
+		> rmf [MODID|MODNAME]
+	zip - Add a mod from a zip
+		> zip [FILE]
+	zipnamed - Add a mod from a zip and use a custom name
+		> zip [FILE] [NAME]
+	download - Download a mod from a URL and optionally use a custom name
+		> download [URL] [NAME]
+	stripver - Strip the version from a mod name and save it's version seperately
+		> stripver [MODID|MODNAME]
+	stripversions - Runs stripver on ALL mods
+		> stripversions
+	importlist - Imports a list of mods from a txt file (UNFINISHED)
+		> importlist [file]
+	exportlist - Exports a list of mods to a txt file
+		> exportlist [file]
+		]])
 	end
 }
+
 actions.r = actions.remove
+actions.disable = actions.remove
+actions.d = actions.disable
 actions.lf = actions.listfiles
 actions.i = actions.install
+actions.enable = actions.install
+actions.e = actions.enable
 actions.rmf = actions.registermoddedfile
 actions.rmfl = actions.registermoddedfilelist
 actions.l = actions.list
@@ -418,6 +537,7 @@ for i in pairs(actions) do
 	table.insert(a,i)
 end
 table.sort(a)
+util.execute('rm -r "./MANAGERDOWNLOADS"')
 actions.tui = function()
 
 	local aliases = {
@@ -454,7 +574,7 @@ actions.tui = function()
 	while true do
 		os.execute('clear')
 		actions.list()
-		printf('---------------\nSelected mod: %q, Selected action: %s\nCommands: %s',selection,cached_action,table.concat(a,', '))
+		printf('---------------\nSelected mod: %q, Selected action: %s\nUse help for a list of actions',selection,cached_action,table.concat(a,', '))
 		local cmd = util.splitCommand(io.read())
 		if(#cmd <= 0) then
 			print('Nothing to do')
@@ -485,7 +605,8 @@ actions.tui = function()
 end
 local action = actions[tostring(arg[1]):lower()]
 if not action then
-	print(('%q is not a valid command\n valid commands:%s'):format(arg[1] or "",table.concat(a,', ')))
+	print(('%q is not a valid command'):format(arg[1] or ""))
+	actions.help()
 	return 
 end
 table.remove(arg,1)
