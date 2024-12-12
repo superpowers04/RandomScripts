@@ -225,7 +225,7 @@ actions = {
 		local shouldSort = sort ~= nil
 		sort = truthy(sort)
 		local VERSIONSIZE = 0
-		for i,v in pairs(modList) do
+		for i,v in pairs(_modList) do
 			local file = io.open('./ManagerMods/'..v..'/MMVERSION','r')
 			if(file) then
 				version = file:read('*a')
