@@ -7,14 +7,20 @@
 -- Currently, the mod manager doesn't keep track of ANY files, it just goes off of the files it finds inside of a mod, so if a file is not included in the zip, it should never be modified
 -- 7z is required for the zip command
 local util = require('SuperUtils')
+insert = table.insert
+
 
 
 -- Config
+-- Note you can copy this section to a mmconfig.lua and that'll be read instead. 
+-- It is highly recommended you do that instead
+
 
 -- Folders that can be used to identify zips for the game
 KnownFolders = { 
 	"/r6/",
 	'/red4ext/',
+	'/engine/',
 	"/archive/",
 	'/bin/x64/'
 }
@@ -25,7 +31,28 @@ ActuallyCopyFolders={
 -- Will add extra warnings for troubleshooting
 minorWarnings = false
 
+
 -- Actual script
+
+APIKEYS = {}
+
+local succ = pcall(require,'mmconfig')
+
+if not succ then 
+	local configFile = io.open('mmconfig.lua','w')
+	configFile:write(([[
+	-- Example config file, the config file directly uses lua, so it's syntax is required.
+
+	--insert(KnownFolders,"/bin/") -- Adds "/bin/" to the KnownFolders config option
+
+	APIKEYS={ -- API keys for specific services, right now only NexusMods is supported
+		NEXUS="", -- You can get an API KEY from https://www.nexusmods.com/users/myaccount?tab=api
+		-- To use, you need to click ModManager Download, > Slow/Fast download > Cancel the auto open > Copy the link on "Click Here", then use the download action with the link
+	}
+	]]):gsub('\n\t','\n'))
+	configFile:close()
+	print('Example config file generated at mmconfig.lua, please look at it')
+end
 
 local arg = arg or args
 local pwd = os.getenv('PWD')..'/'
@@ -241,7 +268,7 @@ actions = {
 			local size = str .. (' '):rep(4-#str)
 			local version = versions[v] or "N/A"
 			local enabled = fileExists('./ManagerMods/'..v..'/enabled')
-			local txt = size .. ' | ' .. (enabled and "✔" or '🗙') ..' | '..version..(" "):rep(VERSIONSIZE-#version)..' | '.. v
+			local txt = size .. ' | ' .. (enabled and "*" or ' ') ..' | '..version..(" "):rep(VERSIONSIZE-#version)..' | '.. v
 			if(shouldSort) then
 				if(enabled == sort) then
 					modList[#modList+1] = txt
@@ -326,6 +353,40 @@ actions = {
 	end,
 	download = function(url,name)
 		if not url then return printf('Missing URL!') end
+		if(url:find('nxm://')) then
+			local game,mod,file = url:match("nxm://([^/]+)/mods/(%d+)/files/(%d+)")
+			local extra = ""
+			-- key=nZHadfXccAzcjwFaeX7dGQ&expires=1734410077&user_id=94294328
+			if(url:find('?')) then
+				extra = url:match("nxm://[^/]+/mods/%d+/files/%d+%?(.+)")
+			end
+			-- local key,expires,user_id = url:match('key=([^&]+)'),url:match('expires=([^&]+)'),url:match('user_id=([^&]+)')
+			if not game or not mod or not file then
+				return printf('Invalid nexus mod manager url!')
+			end
+			url = ('nexusmods.com/%s/mods/%s?file_id=%s&%s'):format(game,mod,file,extra)
+		end
+		if(url:find('nexusmods.com')) then
+			if not APIKEYS.NEXUS or APIKEYS.NEXUS == "" then
+				return printf('Downloading from nexus requires an API key, check mmconfig.lua for more information about how to add one!')
+			end
+			local game,mod,file,extra = url:match('nexusmods.com/([^/]+)/mods/(%d+).-file_id=(%d+)(.+)')
+			print(game,mod,file,extra,url)
+			if not game or not mod or not file then
+				return printf('Invalid nexusmods url! You need to copy the link from the "manual download" button')
+			end
+			local response = util.exec('curl',
+				('https://api.nexusmods.com/v1/games/%s/mods/%s/files/%s/download_link.json?%s'):format(game,mod,file,extra or ""),
+				"-H",("apikey: %s"):format(APIKEYS.NEXUS),
+				"-H","Application-Version: 0.0.1",
+				"-H","Application-Name: SupersBadModManager"
+			)
+
+			url = response:match('"URI":"(.-)"'):gsub('\\u(%d%d%d%d)',function(a) return utf8.char(tonumber(a)+12) end)
+			if not url then
+				return printf('Nexus sent an invalid response! Maybe you copied the wrong link? You need to copy the link from the "manual download" button\n%s',response)
+			end
+		end
 		local MODNAME,version = nil, "dl date: "..os.date('%x')
 		if not name then 
 			name = url:match('.+/([^?]+)%.')
@@ -364,14 +425,15 @@ actions = {
 		actions.zipnamed(file,name)
 		util.execute('rm '..file)
 	end,
-	install = function(mod,force,allowFuzzy)
+	install = function(mod,force,allowFuzzy,forceCopy)
 		if not mod or mod == ""  then return printf('No mod specified!') end
 		mod = getMod(mod)
 		local modName = mod
 		if not (truthy(allowFuzzy)) then modName = modName .. '/' end
 		local plainList = util.execute('find','ManagerMods/'..modName,'-type','f')
 		if not plainList or plainList == "" then return printf('%s is not a valid mod!',modName) end
-		local force = truthy(force)
+		forceCopy = truthy(forceCopy)
+		force = truthy(force) or forceCopy
 		local nameLength = #modName
 		for _file in plainList:gmatch('(ManagerMods/(.-/[^\n]+))') do
 			local path = pwd.._file
@@ -387,7 +449,7 @@ actions = {
 			end
 			if(not force and not isLink and not ftype:find('%(No such file or directory%)')) then
 				printf('%q is an existing file! (%s)',file,ftype)
-			elseif manualFile then
+			elseif forceCopy or manualFile then
 				printf('Copying %q',file)
 				if(isLink) then
 					util.execute('unlink',file)
