@@ -382,10 +382,11 @@ actions = {
 				"-H","Application-Name: SupersBadModManager"
 			)
 
-			url = response:match('"URI":"(.-)"'):gsub('\\u(%d%d%d%d)',function(a) return utf8.char(tonumber(a)+12) end)
+			url = response:match('"URI":"(.-)"')
 			if not url then
 				return printf('Nexus sent an invalid response! Maybe you copied the wrong link? You need to copy the link from the "manual download" button\n%s',response)
 			end
+			url = url:gsub('\\u(%d%d%d%d)',function(a) return utf8.char(tonumber(a)+12) end)
 		end
 		local MODNAME,version = nil, "dl date: "..os.date('%x')
 		if not name then 
