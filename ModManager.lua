@@ -31,6 +31,9 @@ ActuallyCopyFolders={
 -- Will add extra warnings for troubleshooting
 minorWarnings = false
 
+-- If you just enter an ID while this is true, it'll toggle the mod at said ID
+idToToggle = true
+
 
 -- Actual script
 
@@ -77,6 +80,15 @@ local function getMod(id)
 			return id:match('ManagerMods/(.-)/')
 		end
 		return id
+	end
+	local list = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
+	return list[n]
+end
+local function getModFromID(id)
+	local n = tonumber(id)
+
+	if(not n or n ~= n) then 
+		return nil
 	end
 	local list = util.execute('ls -1Nq --color=none','ManagerMods'):split('\n')
 	return list[n]
@@ -660,8 +672,16 @@ actions.tui = function()
 			print('Press enter to continue')
 			io.read()
 		else
-			printf('%q is not a valid action!',action_string)
-			io.read()
+			local ID = getModFromID(action_string)
+			if(ID) then
+				actions[fileExists('ManagerMods/'..ID..'/enabled') and 'remove' or 'install'](ID)
+				io.read()
+
+			else 
+				printf('%q is not a valid action!',action_string)
+				io.read()
+
+			end
 		end
 		::continue::
 	end
